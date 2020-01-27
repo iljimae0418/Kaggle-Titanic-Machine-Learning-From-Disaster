@@ -437,11 +437,81 @@ write_csv(submission,'titanic_gbm_added.csv')
 ```
 77% accuracy upon submission. 79.4% is our best accuracy so far.    
 
+# Logistic Regression with Regularization 
+
+Let's try logistic regression with L1 and L2 regularization. 
+First is a ridge regression, with L2 regularization. 
+```{r}
+df_train <- train 
+df_test <- test 
+df_test$Survived <- NA 
+combined <- rbind(df_train,df_test)  
+df_train <- combined[1:nrow(df_train),]
+df_test <- combined[nrow(df_train)+1:nrow(test),]   
+library(glmnet) 
+set.seed(1)
+x <- model.matrix(Survived~Pclass+Sex+Age+SibSp+Parch+Fare+FamilySize+Title+CabinGroup,data = df_train) 
+y <- df_train$Survived 
+newx <- model.matrix(~Pclass+Sex+Age+SibSp+Parch+Fare+FamilySize+Title+CabinGroup,data=df_test)
+ridge.fit <- cv.glmnet(x,y,alpha=0,family='binomial',type.measure='deviance') 
+plot(ridge.fit)
+ridge.pred <- predict(ridge.fit,newx=newx,s='lambda.min',type='response') 
+ridge.binary <- ifelse(ridge.pred > 0.5,1,0)     
+submission <- data_frame('PassengerId' = test$PassengerId,'Survived' = ridge.binary) 
+write.csv(submission,'titanic_logistic_ridge.csv',row.names=FALSE)  
+```
+We then try L1 regularization, or the Lasso. 
+```{r}
+set.seed(1)
+x <- model.matrix(Survived~Pclass+Sex+Age+SibSp+Parch+Fare+FamilySize+Title+CabinGroup,data = df_train) 
+y <- df_train$Survived 
+newx <- model.matrix(~Pclass+Sex+Age+SibSp+Parch+Fare+FamilySize+Title+CabinGroup,data=df_test)
+lasso.fit <- cv.glmnet(x,y,alpha=1,family='binomial',type.measure='deviance') 
+plot(lasso.fit)
+lasso.pred <- predict(lasso.fit,newx=newx,s='lambda.min',type='response') 
+lasso.binary <- ifelse(lasso.pred > 0.5,1,0)     
+submission <- data_frame('PassengerId' = test$PassengerId,'Survived' = lasso.binary) 
+write.csv(submission,'titanic_logistic_lasso.csv',row.names=FALSE)  
+```
+Both record a score of 77.5%. Somewhat similar to logistic regression without any regularization. 
+
+# Ensemble 
+
+We use the majority vote method to ensemble the three best performing results. 
+
+```{r}
+gbm_best <- read.csv('./titanic_gbmtune1.csv')$Survived 
+gbm_second_best <- read.csv('./titanic_gbm2.csv')$Survived
+lasso_best <- read.csv('./titanic_logistic_lasso.csv')$Survived  
+Ensemble <- c() 
+for (i in 1:length(gbm_best)){
+  cnt1 <- 0 
+  cnt0 <- 0 
+  if (gbm_best[i] == 1) cnt1 = cnt1+1  
+  else cnt0 = cnt0+1 
+  if (gbm_second_best[i] == 1) cnt1 = cnt1+1  
+  else cnt0 = cnt0+1 
+  if (lasso_best[i] == 1) cnt1 = cnt1+1  
+  else cnt0 = cnt0+1   
+  if (cnt0 > cnt1){
+    Ensemble <- c(Ensemble,0)
+  }else{
+    Ensemble <- c(Ensemble,1)
+  }
+}
+submission <- data_frame('PassengerId' = test$PassengerId,'Survived' = Ensemble)
+write.csv(submission,'titanice_ensemble.csv') 
+```
+Unfortunately, a worse performance of 74% accuracy. 
+
 # Possible next steps 
 
-- More feature engineering: we have not looked at features such as Ticket and Embarked in great detail. Also, we could create more relevant features from Title, such as the significance of Mrs (is this woman a mother?) or Master (what does it mean for a male to be labeled as a master?) 
+- More feature engineering: we have not looked at features such as Ticket and Embarked in great detail. Also, we could create more relevant features from Title, such as the significance of Mrs (is this woman a mother?) or Master (what does it mean for a male to be labeled as a master?) Also, especially for GBM, it appeared that after feature engineering the results showed a decrease in prediction accuracy, and this might mean that some of the features I came up with could be adding noise to the data. 
 
-- Trying more models: We could try xgboost, lightgbm, logistic regression with regularization etc and if we achieve reasonably high results on the public leaderboard, we could use the results from these models to form an ensemble (along with my current top performing gbm model). We would have to be using majority vote ensemble as we are dealing with a binary classification problem. 
+- Trying more models after better feature engineering: We could try xgboost, lightgbm, logistic regression with regularization etc and if we achieve reasonably high results on the public leaderboard, we could use the results from these models to form an ensemble. We would have to be using majority vote ensemble as we are dealing with a binary classification problem.  
+
+- Possibly get rid of anomalies if there exists any    
+
 
 
 
