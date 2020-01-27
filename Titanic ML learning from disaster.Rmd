@@ -1,0 +1,455 @@
+---
+title: "Titanic: Machine Learning From Disaster"
+output: pdf_document
+author: Luke Kim (mkim14@stanford.edu)
+name: Luke Kim 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#1. Introduction and preliminary observation of data 
+
+Given information about the passenger, we need to predict whether the passenger will survive the titanic accident or not. This is a classification problem. Let us read in the data first. The details of the data is given in this website: https://www.kaggle.com/c/titanic/data. Also, this is the link to the actual competition: https://www.kaggle.com/c/titanic/overview. 
+
+```{r}
+train <- read.csv('./train.csv')
+test <- read.csv('./test.csv') 
+head(train) 
+head(test)
+```
+
+Let's extract the IdList for submission purposes. 
+```{r}
+IdList <- test$PassengerId
+```
+
+Let's examine the data a little bit. We can first see the summary for each columns. 
+```{r}
+summary(train)
+summary(test)
+```
+```{r}
+str(train)
+```
+Let's examine how many data points we have 
+```{r}
+nrow(train)
+nrow(test)
+```
+We have 891 for training and 418 for testing. 
+
+We could then look at the existence of NAs for each columns for the train data
+```{r}
+colnames(train)[colSums(is.na(train)) > 0] 
+```
+We do the same for the test data 
+```{r}
+colnames(test)[colSums(is.na(test)) > 0] 
+```
+There appears to be missing data for Age and Fare in the test set and Age for the train set. Let's try to take care of the missing values for Age first. Also, although there are no NA values, a lot of the data for Cabin are missing. Let's try to deal with these in the next section. 
+
+Also, just briefly looking over the data, there appears to be some correlation between Fare and Survived. Let's check if this is true. From the summary of the data above, the mean value of Fare is $32. 
+
+```{r}
+business <- train$Survived[train$Fare > 32]
+cnt = 0 
+for (i in 1:length(business)){
+  if (business[i] == 1){
+    cnt = cnt+1 
+  }
+}
+cat("Percent of survival for business = ",cnt*100/length(business),"\n") 
+economy <- train$Survived[train$Fare <= 32] 
+cnt = 0 
+for (i in 1:length(economy)){
+  if (economy[i] == 1){
+    cnt = cnt+1 
+  }
+}
+cat("Percent of survival for economy = ",cnt*100/length(economy),"\n")
+```
+Yes this kind of explains that those who paid more to board on the Titanic has close to two times more survival percentage than those who paid less. I believe that Fare actually is one of the most determining features of survival. 
+
+Also, let's think about Sex (gender). It would be common to think that women actually had a greater survival percentage than men because women and children were probably rescued first. Let's examine this. 
+
+```{r}
+women <- train$Survived[train$Sex == "female"]
+men <- train$Survived[train$Sex == "male"] 
+cnt1 = 0
+cnt2 = 0 
+for (i in 1:length(women)){
+  if (women[i] == 1){
+    cnt1 = cnt1+1 
+  }
+}
+for (i in 1:length(men)){
+  if (men[i] == 1){
+    cnt2 = cnt2+1 
+  }
+} 
+cat("Survival percentage of women = ",cnt1*100/length(women),"\n") 
+cat("Survival percentage of men = ",cnt2*100/length(men),"\n")
+```
+So we can see that women had a much higher survival rate then men. So gender also plays an important role in predicting survival. 
+
+#2. Missing value imputation 
+
+There are many ways to impute the missing values for Age, for instance we could replace the NA values for Age to the median or the mean of Age. The method we are going to use for now is the impute the missing Age values using other features to predict Age by the (multiple) linear regression model. Some of the features that may be relevant to determining age could be SibSp (number of siblings), Pclass (ticket class), Parch (number of parents/children aboard), Fare (the amount the passenger had to pay), and Sex (gender of the passenger). 
+
+```{r}
+age.fit <- lm(Age~Pclass+Sex+SibSp+Fare+Parch,data=train)
+summary(age.fit)
+```
+The R-squared value is pretty low, but that is expected since the features I have may be relevant to predicting age, but are not really strong indicators of the age of the passenger. Let's make the prediction of Age based on our linear model, then replace NA values for the Age columns with our predictions.  
+```{r}
+age.prediction <- predict(age.fit,train)
+age_list <- train$Age
+for (i in 1:length(age_list)){
+  if (is.na(age_list[i])){
+    age_list[i] = age.prediction[i] 
+  }
+}
+train$Age <- age_list 
+sum(is.na(train$Age))
+```
+It appears that we have successfully imputed missing values for Age for the training data. Let us do the same for the test data. 
+```{r}
+age.fit.test <- lm(Age~Pclass+Sex+SibSp+Fare+Parch,data=test)
+summary(age.fit.test)
+```
+```{r}
+age.predict.test <- predict(age.fit.test,test) 
+age_list_test <- test$Age
+for (i in 1:length(age_list_test)){
+  if (is.na(age_list_test[i])){
+    age_list_test[i] = age.predict.test[i] 
+  }
+}
+test$Age <- age_list_test 
+sum(is.na(test$Age)) 
+```
+Let us now fill in the missing value for Fare. 
+```{r}
+sum(is.na(test$Fare))
+```
+So there appears to be only one value of Fare that is missing. Let's use linear regression to impute the values for Fare. Factors that may affect the Fare price is Cabin (cabin number),Embarked (the port of embarkation), Pclass ("Ticket class"). 
+```{r}
+fare.fit <- lm(Fare~Cabin+Embarked+Pclass,data=test) 
+fare.predict <- predict(fare.fit,test)
+fare_list <- test$Fare  
+for (i in 1:length(fare_list)){
+  if (is.na(fare_list[i])){
+    fare_list[i] = fare.predict[i]  
+  }
+}
+test$Fare <- fare_list
+sum(is.na(test$Fare))
+```
+We noted above that there are also many missing values for Cabin, but they are treated as missing and not exactly filled with NAs. Because there are too many missing values for Cabin and this is not something that we can predict (unless we decide to randomly assign passengers to some seat number - this may add to a lot of noise in the data), we will just let it be.  
+
+# Logistic Regression 
+
+Now let's try to fit a model for prediction. The most famous model for binary classification is logistic regression. In R, we fit logistic regression using the glm() function. First of all, let's get rid of some features that would obviously not help in our prediction. These would include the Id number of the passengers, the name of the passengers and the ticket number, because these are just random information that most likely does not have any relation to survival. 
+
+```{r}
+df_train <- train 
+df_train$PassengerId <- NULL 
+df_train$Name <- NULL 
+df_train$Ticket <- NULL 
+glm.fit <- glm(Survived~.,data=df_train,
+               family="binomial") 
+summary(glm.fit)
+```
+It appears that Cabin information may actually just be adding noise to our prediction. Let's get rid of it and fit another logistic regression model  
+
+```{r}
+df_train$Cabin <- NULL 
+glm.fit <- glm(Survived~.,data=df_train,
+               family="binomial") 
+summary(glm.fit)
+```
+
+Let's now make prediction with the fitted logistic regression model. We say that the person will survive if the probability of predicted survival is greater than 0.5. Let's also write this prediction to our submission file. 
+```{r}
+library(tidyverse)
+df_test <- test
+df_test$PassengerId <- NULL 
+df_test$Name <- NULL 
+df_test$Ticket <- NULL 
+df_test$Cabin <- NULL 
+glm.probs <- predict(glm.fit,df_test,type="response") 
+glm.binary <- ifelse(glm.probs > 0.5,1,0)
+submission <- data_frame('PassengerId' = IdList, 'Survived' = glm.binary)
+write_csv(submission,'titanic_logistic_regression.csv')
+```
+
+Upon submission, we get a result of 0.76076 which means we managed to predict approximately 76% of the outcomes correctly. This places us in the top 80%. Our aim in the later sections would be to improve this result! 
+
+# Suppor Vector Machines 
+Next up after logistic regression is support vector machines. We first use SVMs with linear kernel and cost 10. The cost argument simply means that when cost is small, then the margins will be wide and many support vectors will be on the margin or will violate the margin, whereas if the cost is large the margins will be narrow and there will be few support vectors on the margin or violating the margin. 
+```{r}
+library(e1071) 
+svm.lin <- svm(as.factor(Survived)~Pclass+Sex+Age+SibSp+Parch+Fare,
+               data=train,kernel="linear",cost=10) 
+svm.lin.pred <- predict(svm.lin,test)  
+submission <- data_frame('PassengerId' = IdList, 'Survived' = svm.lin.pred)
+write_csv(submission,'titanic_svmlinear1.csv')
+```
+
+Upon submission, we get a result of 76.5% a slight improvement from our previous submission with logistic regression. Let's see if we can do better with different kernels (something more flexible than linear). 
+
+```{r}
+svm.rad <- svm(as.factor(Survived)~Pclass+Sex+Age+SibSp+Parch+Fare,
+               data=train,kernel="radial",cost=10,gamma=1) 
+svm.rad.pred <- predict(svm.rad,test)  
+submission <- data_frame('PassengerId' = IdList, 'Survived' = svm.rad.pred)
+write_csv(submission,'titanic_svmradial1.csv')
+```
+
+We did slightly worse at 76%. We can play around with different values of costs and gamma and different kernels, but the improvement seems minimal, so let's switch to a different model where we might be able to see dramatic improvements in prediction accuracy. 
+
+# Random Forests 
+ 
+Random forests is when we first get a bootstrapped sample of the tree and consider only a subset of the variables at each step to form a decision tree. We repeat this many times to get a wide variety of trees. We test the data on all the trees we made and take the one with the most number of votes (since we are dealing with a binary classification problem). We also call this bagging, since we use bootstrapping to generate data and use the aggregate to make a decision. Let's see how well our random forest works for predicting the titanic data. 
+
+```{r}
+library(randomForest)
+set.seed(1)
+rf <- randomForest(as.factor(Survived)~Pclass+Sex+Age+SibSp+Parch+Fare,
+                   data = train,ntree=100,importance=TRUE) 
+rf.predict <- predict(rf,test) 
+submission <- data_frame('PassengerId' = IdList,'Survived' = rf.predict)
+write_csv(submission,'titanic_rf1.csv') 
+```
+
+Upon submission, we see a slight increase in accuraccy to 77.5%. Let's try more number of trees. 
+
+```{r}
+library(randomForest)
+set.seed(1)
+rf <- randomForest(as.factor(Survived)~Pclass+Sex+Age+SibSp+Parch+Fare,
+                   data = train,ntree=1000,importance=TRUE) 
+rf.predict <- predict(rf,test) 
+submission <- data_frame('PassengerId' = IdList,'Survived' = rf.predict)
+write_csv(submission,'titanic_rf2.csv') 
+```
+
+A slight decrease in performance at 77% accuracy. Let's move on to a different model, namely the gradient boosting model. 
+
+# Boosting
+
+Random forest models build an ensemble of deep independent trees, whereas the GBM builds an ensemble of shallow and weak successive trees with each tree learning and improving on the previous, and when these trees are combined, they produce a powerful committee that outperforms many other models. For GBM, it is important to tune the parameters. 
+- n.trees: the number of iterations (trees) in the model 
+- interaction.depth: the numbers of splits it has to perform on a tree 
+- shrinkage: learning rate  
+- n.minobsinnode: minimum number of observations in the tree terminal nodes. 
+
+Let's just try some combination of parameters I like to use:  
+
+```{r}
+library(gbm)
+set.seed(1) 
+boost.model <- gbm(Survived~Pclass+Sex+Age+SibSp+Parch+Fare,
+                   data=train,n.trees = 10000,interaction.depth=4,
+                   shrinkage=0.001,distribution="bernoulli") 
+boost.predict <- predict(boost.model,newdata=test,n.trees=10000,type="response") 
+boost.binary <- ifelse(boost.predict > 0.5,1,0)
+submission <- data_frame('PassengerId' = IdList,'Survived' = boost.binary)
+write_csv(submission,'titanic_gbm2.csv') 
+```
+
+Upon submission, this gbm model gives a prediction accuracy of 78.46%. Again a small improvement. Although it was a small improvement, we jumped from top 80% to top 31% of all participants. Let's see how we can further improve our score.
+
+Let's try the caret package for tuning the number of trees (3 fold repated cross validation). Let's try with smaller number of trees from the range 50~300.  
+
+```{r}
+library(caret)
+fitControl <- trainControl(method='repeatedcv',
+                           number = 3,
+                           repeats = 3) 
+
+newGrid <- expand.grid(n.trees = c(50, 100, 150, 200, 250, 300), 
+                       interaction.depth = 6,
+                       shrinkage = 0.01,
+                       n.minobsinnode = 10
+                       )
+
+gbmFit <- train(Survived ~Pclass+Sex+Age+SibSp+Parch+Fare, data=train, 
+                 method = 'gbm', 
+                 trControl = fitControl,
+                 tuneGrid =  newGrid,
+                 bag.fraction = 0.5,
+                 verbose = FALSE)
+
+gbmFit$bestTune
+```
+We now tune the interaction depth and the learning rate. 
+```{r}
+newGrid <- expand.grid(n.trees = 300, 
+                       interaction.depth = c(4:10),
+                       shrinkage = c(0.01,0.001),
+                       n.minobsinnode = 10
+                       )
+
+gbmFit <- train(Survived ~Pclass+Sex+Age+SibSp+Parch+Fare, data=train, 
+                 method = 'gbm', 
+                 trControl = fitControl,
+                 tuneGrid =  newGrid,
+                 bag.fraction = 0.5,
+                 verbose = FALSE)
+
+gbmFit$bestTune
+```
+Let's try best tune values (among the values we tried) 
+```{r}
+set.seed(1)
+boost.tune <- gbm(Survived~Pclass+Sex+Age+SibSp+Parch+Fare,
+                   data=train,n.trees = 300,interaction.depth=10,
+                   shrinkage=0.01,n.minobsinnode = 10,distribution="bernoulli") 
+boost.predict <- predict(boost.tune,newdata=test,n.trees=300,type="response")  
+boost.binary <- ifelse(boost.predict > 0.5,1,0)
+submission <- data_frame('PassengerId' = IdList,'Survived' = boost.binary)
+write_csv(submission,'titanic_gbmtune1.csv') 
+```
+
+We get an accuracy of 79.4%. Great! an improvement. We are now within the top 17% of the participants. Perhaps we could try some more values for tuning 
+
+```{r eval = FALSE}
+library(caret)
+fitControl <- trainControl(method='repeatedcv',
+                           number = 3,
+                           repeats = 3) 
+
+newGrid <- expand.grid(n.trees = c(350,400,450,500,550,600), 
+                       interaction.depth = c(4:12),
+                       shrinkage = c(0.01,0.001),
+                       n.minobsinnode = 10
+                       )
+
+gbmFit <- train(Survived~Pclass+Sex+Age+SibSp+Parch+Fare, data=train, 
+                 method = 'gbm', 
+                 trControl = fitControl,
+                 tuneGrid =  newGrid,
+                 bag.fraction = 0.5,
+                 verbose = FALSE)
+
+gbmFit$bestTune
+```
+We obtained the best tune to be 550 trees, 6 for interaction depth, 0.01 shrinkage. Let's try these parameters. 
+
+```{r}
+set.seed(1)
+boost.tune <- gbm(Survived~Pclass+Sex+Age+SibSp+Parch+Fare,
+                   data=train,n.trees = 550,interaction.depth=6,
+                   shrinkage=0.01,n.minobsinnode = 10,distribution="bernoulli") 
+boost.predict <- predict(boost.tune,newdata=test,n.trees=550,type="response")  
+boost.binary <- ifelse(boost.predict > 0.5,1,0)
+submission <- data_frame('PassengerId' = IdList,'Survived' = boost.binary)
+write_csv(submission,'titanic_gbmtune2.csv') 
+```
+
+Unfortunately, we have a lower accuracy at 77%. How about we try more features? 
+
+# Feature Engineering 
+
+We can do some feature engineering and come up with some additionally interesting features such as family size, which is a variable denoting how many familiy members a person has on board on Titanic. 
+
+```{r}
+train$FamilySize <- train$Parch+train$SibSp+1 
+test$FamilySize <- test$Parch+test$SibSp+1 
+```
+We can also generate features Title and marriage status.  
+
+Title means "Mr","Mrs","Dr","Miss" etc. Notice that the title is between the delimiters "," and "." in the Name column.  
+```{r}
+title.extract <- function(x){
+    strsplit(toString(x), split = "[,.]")[[1]][2]
+}
+train$Title <- sapply(train$Name,FUN=title.extract) 
+test$Title <- sapply(test$Name,FUN=title.extract)      
+train$Title <- sub(" ","",train$Title) 
+test$Title <- sub(" ","",test$Title)   
+# convert to factor data type  
+train$Title <- as.factor(train$Title) 
+test$Title <- as.factor(test$Title)
+```
+
+To get the marital status, if the title is Mrs, we say the person is married (1) and if the title is something else, we label it 0 (we do not know if the person is married or not). However, the Title column is probably enough for now (we'll see if we should add marriage status later). 
+
+Perhaps we should apply feature engineering for Cabin too. Our plan is to extract the first letter of the cabin and replace the cabin information with this first letter. For missing values (empty string) for cabin, we will replace it with the character 'NO' to indicate that we do not have information about this Cabin.  
+```{r}
+cabin.group.extract <- function(x){
+  substring(x,1,1) 
+}
+train$CabinGroup <- sapply(train$Cabin,cabin.group.extract)
+test$CabinGroup <- sapply(test$Cabin,cabin.group.extract)
+for (i in 1:length(train$CabinGroup)){
+  if (train$CabinGroup[i]==""){
+    train$CabinGroup[i] =  "NO"
+  }
+}
+for (i in 1:length(test$CabinGroup)){
+  if (test$CabinGroup[i] == ""){
+    test$CabinGroup[i] = "NO"
+  }
+}
+# convert to factors 
+train$CabinGroup <- as.factor(train$CabinGroup) 
+test$CabinGroup <- as.factor(test$CabinGroup) 
+```
+With these new features, let's run caret again for hyper parameter optimization. 
+```{r eval = FALSE}
+library(caret)
+fitControl <- trainControl(method='repeatedcv',
+                           number = 3,
+                           repeats = 3) 
+
+newGrid <- expand.grid(n.trees = c(50,100,150,200,250,300,350,400,450,500,550,600), 
+                       interaction.depth = c(4:12),
+                       shrinkage = c(0.01,0.001),
+                       n.minobsinnode = 10
+                       )
+
+gbmFit <- train(Survived~Pclass+Sex+Age+SibSp+Parch+Fare+
+                  FamilySize+Title+CabinGroup,
+                data=train, 
+                 method = 'gbm', 
+                 trControl = fitControl,
+                 tuneGrid =  newGrid,
+                 bag.fraction = 0.5,
+                 verbose = FALSE)
+
+gbmFit$bestTune
+```
+It took a while to run, but the parameters we get are n.trees=350, interaction.depth=9 and shrinkage = 0.01.  
+```{r}
+set.seed(1)
+boost.tune <- gbm(Survived~Pclass+Sex+Age+SibSp+Parch+Fare+FamilySize+Title+CabinGroup,
+                   data=train,n.trees = 350,interaction.depth=9,
+                   shrinkage=0.01,n.minobsinnode = 10,distribution="bernoulli") 
+boost.predict <- predict(boost.tune,newdata=test,n.trees=350,type="response")  
+boost.binary <- ifelse(boost.predict > 0.5,1,0)
+head(boost.binary)
+submission <- data_frame('PassengerId' = IdList,'Survived' = boost.binary)
+write_csv(submission,'titanic_gbm_added.csv') 
+```
+77% accuracy upon submission. 79.4% is our best accuracy so far.    
+
+# Possible next steps 
+
+- More feature engineering: we have not looked at features such as Ticket and Embarked in great detail. Also, we could create more relevant features from Title, such as the significance of Mrs (is this woman a mother?) or Master (what does it mean for a male to be labeled as a master?) 
+
+- Trying more models: We could try xgboost, lightgbm, logistic regression with regularization etc and if we achieve reasonably high results on the public leaderboard, we could use the results from these models to form an ensemble (along with my current top performing gbm model). We would have to be using majority vote ensemble as we are dealing with a binary classification problem. 
+
+
+
+
+
+
+
+
+
+
+
