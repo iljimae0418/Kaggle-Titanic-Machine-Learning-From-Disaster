@@ -510,7 +510,7 @@ Unfortunately, a worse performance of 74% accuracy.
 
 - Trying more models after better feature engineering: We could try xgboost, lightgbm, logistic regression with regularization etc and if we achieve reasonably high results on the public leaderboard, we could use the results from these models to form an ensemble. We would have to be using majority vote ensemble as we are dealing with a binary classification problem.  
 
-- Possibly get rid of anomalies if there exists any    
+- It appears that CatBoost is particularly useful in this problem. The Catboost apparently uses one-hot encoding for all categorical features with number of categories less than the specified one_hot_max_size. Also the rest of the categorical features are encoded using the mean encoding scheme. This method assigns the mean of the target value for each category and tries to achieve a better separation between classes. CatBoosts seem to achieve at least an 80% accuracy on the public leaderboard as demonstrated by https://www.kaggle.com/pavlofesenko/simplest-top-10-titanic-0-80861 and https://www.kaggle.com/manrunning/catboost-for-titanic-top-7/output
 
 
 
